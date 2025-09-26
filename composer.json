@@ -1,0 +1,27 @@
+{
+    "name": "moped/woocommerce-sentry-logger",
+    "description": "A simple WooCommerce log handler that sends logs to Sentry using the Sentry PHP SDK",
+    "type": "wordpress-plugin",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Peter Morvay",
+            "email": "moped@jepan.sk"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "sentry/sentry": "^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "MoPed\\SentryLogger\\": "includes/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
