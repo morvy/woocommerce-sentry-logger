@@ -152,6 +152,9 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
             // WooCommerce specific context
             $attributes = array_merge( $attributes, $this->get_woocommerce_context() );
 
+            // Plugin context
+            $attributes = array_merge( $attributes, $this->get_plugin_context() );
+
             return $attributes;
         }
 
@@ -341,10 +344,25 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 }
             }
 
+            // IP addresses grouped under 'ip'
+            $ip_info = [];
             if ( isset($_SERVER['REMOTE_ADDR']) ) {
-                if ( $this->should_include_pii_field( 'remote_addr' ) ) {
-                    $context['remote_addr'] = sanitize_text_field( $_SERVER['REMOTE_ADDR'] );
+                if ( $this->should_include_pii_field( 'ip_remote_addr' ) ) {
+                    $ip_info['remote_addr'] = sanitize_text_field( $_SERVER['REMOTE_ADDR'] );
                 }
+            }
+            if ( isset($_SERVER['HTTP_X_FORWARDED_FOR']) ) {
+                if ( $this->should_include_pii_field( 'ip_x_forwarded_for' ) ) {
+                    $ip_info['x_forwarded_for'] = sanitize_text_field( $_SERVER['HTTP_X_FORWARDED_FOR'] );
+                }
+            }
+            if ( isset($_SERVER['HTTP_X_REAL_IP']) ) {
+                if ( $this->should_include_pii_field( 'ip_x_real_ip' ) ) {
+                    $ip_info['x_real_ip'] = sanitize_text_field( $_SERVER['HTTP_X_REAL_IP'] );
+                }
+            }
+            if ( ! empty($ip_info) ) {
+                $context['ip'] = $ip_info;
             }
 
             return $context;
@@ -429,10 +447,14 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
 
             if ( is_user_logged_in() ) {
                 $user = wp_get_current_user();
-                $user_info['id'] = $user->ID;
-                $user_info['logged_in'] = true;
 
-                // PII fields
+                // PII fields including user_id and logged_in
+                if ( $this->should_include_pii_field( 'user_id' ) ) {
+                    $user_info['id'] = $user->ID;
+                }
+                if ( $this->should_include_pii_field( 'user_logged_in' ) ) {
+                    $user_info['logged_in'] = true;
+                }
                 if ( $this->should_include_pii_field( 'user_login' ) ) {
                     $user_info['login'] = $user->user_login;
                 }
@@ -452,7 +474,9 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                     $user_info['registered'] = $user->user_registered;
                 }
             } else {
-                $user_info['logged_in'] = false;
+                if ( $this->should_include_pii_field( 'user_logged_in' ) ) {
+                    $user_info['logged_in'] = false;
+                }
             }
 
             $context['user'] = $user_info;
@@ -497,9 +521,110 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
             return $context;
         }
 
+        /**
+         * Get plugin context based on WP_SENTRY_PLUGIN_LOGGING constant
+         */
+        private function get_plugin_context()
+        {
+            $context = [];
+
+            if ( ! defined( 'WP_SENTRY_PLUGIN_LOGGING' ) ) {
+                return $context;
+            }
+
+            $plugin_logging = WP_SENTRY_PLUGIN_LOGGING;
+
+            if ( $plugin_logging === 'STATS' ) {
+                $context['plugins'] = $this->get_plugin_stats();
+            } elseif ( $plugin_logging === 'ALL' ) {
+                $context['plugins'] = $this->get_all_plugins();
+            }
+
+            return $context;
+        }
+
+        /**
+         * Get plugin statistics
+         */
+        private function get_plugin_stats()
+        {
+            if ( ! function_exists( 'get_plugins' ) ) {
+                require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            }
+
+            $all_plugins = get_plugins();
+            $active_plugins = get_option( 'active_plugins', [] );
+
+            if ( is_multisite() ) {
+                $network_active_plugins = get_site_option( 'active_sitewide_plugins', [] );
+                $network_active_plugins = array_keys( $network_active_plugins );
+                $active_plugins = array_merge( $active_plugins, $network_active_plugins );
+            }
+
+            $stats = [
+                'total' => count( $all_plugins ),
+                'active' => count( array_unique( $active_plugins ) ),
+                'inactive' => count( $all_plugins ) - count( array_unique( $active_plugins ) )
+            ];
+
+            // Check for updates (if available)
+            if ( function_exists( 'get_site_transient' ) ) {
+                $update_plugins = get_site_transient( 'update_plugins' );
+                if ( $update_plugins && isset( $update_plugins->response ) ) {
+                    $stats['updates_needed'] = count( $update_plugins->response );
+                }
+            }
+
+            return $stats;
+        }
+
+        /**
+         * Get all plugins grouped by type
+         */
+        private function get_all_plugins()
+        {
+            if ( ! function_exists( 'get_plugins' ) ) {
+                require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            }
+
+            $all_plugins = get_plugins();
+            $active_plugins = get_option( 'active_plugins', [] );
+
+            if ( is_multisite() ) {
+                $network_active_plugins = get_site_option( 'active_sitewide_plugins', [] );
+                $network_active_plugins = array_keys( $network_active_plugins );
+                $active_plugins = array_merge( $active_plugins, $network_active_plugins );
+            }
+
+            $active_plugins = array_unique( $active_plugins );
+
+            $plugins = [
+                'active' => [],
+                'inactive' => []
+            ];
+
+            foreach ( $all_plugins as $plugin_file => $plugin_data ) {
+                $plugin_info = [
+                    'name' => $plugin_data['Name'],
+                    'version' => $plugin_data['Version'],
+                    'author' => $plugin_data['Author']
+                ];
+
+                if ( in_array( $plugin_file, $active_plugins ) ) {
+                    $plugins['active'][] = $plugin_info;
+                } else {
+                    $plugins['inactive'][] = $plugin_info;
+                }
+            }
+
+            return $plugins;
+        }
+
         private function get_pii_fields()
         {
             $default_pii_fields = [
+                'user_id',
+                'user_logged_in',
                 'user_login',
                 'user_email',
                 'user_display_name',
@@ -510,8 +635,7 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 'ip_x_forwarded_for',
                 'ip_x_real_ip',
                 'request_uri',
-                'user_agent',
-                'server_software'
+                'user_agent'
             ];
 
             return apply_filters( 'wc_sentry_pii_fields', $default_pii_fields );
