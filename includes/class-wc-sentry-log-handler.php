@@ -66,7 +66,8 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
             $formatted_message = $this->format_message( $message, $context );
             $attributes        = $this->prepare_attributes( $context, $timestamp );
 
-            switch ( $level ) {
+            try {
+                switch ( $level ) {
                 case 'emergency':
                 case 'alert':
                 case 'critical':
@@ -88,9 +89,12 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 default:
                     \Sentry\logger()->info( $formatted_message, attributes: $attributes );
                     break;
-            }
+                }
 
-            return true;
+                return true;
+            } catch (Exception $e) {
+                return false;
+            }
         }
 
         private function format_message( $message, $context = [] )
@@ -539,9 +543,43 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
             $plugin_logging = WP_SENTRY_PLUGIN_LOGGING;
 
             if ( $plugin_logging === 'STATS' ) {
-                $context['plugins'] = $this->get_plugin_stats();
+                $plugin_data = $this->get_plugin_stats();
+                // Clean stats structure
+                $context['plugins'] = [
+                    'total' => $plugin_data['total'] ?? 0,
+                    'active' => $plugin_data['active'] ?? 0,
+                    'inactive' => $plugin_data['inactive'] ?? 0
+                ];
+                if (isset($plugin_data['updates_needed'])) {
+                    $context['plugins']['updates_needed'] = $plugin_data['updates_needed'];
+                }
             } elseif ( $plugin_logging === 'ALL' ) {
-                $context['plugins'] = $this->get_all_plugins();
+                $plugin_data = $this->get_all_plugins();
+
+                // Get stats for consistency
+                $stats = $this->get_plugin_stats();
+
+                // Clean structure with list as JSON string for Sentry compatibility
+                $context['plugins'] = [
+                    'total' => $stats['total'] ?? 0,
+                    'active' => $stats['active'] ?? 0,
+                    'inactive' => $stats['inactive'] ?? 0,
+                    'list' => wp_json_encode($plugin_data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                ];
+
+                if (isset($stats['updates_needed'])) {
+                    $context['plugins']['updates_needed'] = $stats['updates_needed'];
+                }
+
+                // Add truncation info at top level if present
+                if (isset($plugin_data['active_truncated'])) {
+                    $context['plugins']['active_truncated'] = true;
+                    $context['plugins']['total_active_actual'] = $plugin_data['total_active'] ?? 0;
+                }
+                if (isset($plugin_data['inactive_truncated'])) {
+                    $context['plugins']['inactive_truncated'] = true;
+                    $context['plugins']['total_inactive_actual'] = $plugin_data['total_inactive'] ?? 0;
+                }
             }
 
             return $context;
@@ -583,7 +621,7 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
         }
 
         /**
-         * Get all plugins grouped by type
+         * Get all plugins grouped by type (with size limit)
          */
         private function get_all_plugins()
         {
@@ -607,6 +645,10 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 'inactive' => []
             ];
 
+            $max_plugins_per_type = 50; // Limit to prevent huge payloads
+            $active_count = 0;
+            $inactive_count = 0;
+
             foreach ( $all_plugins as $plugin_file => $plugin_data ) {
                 $plugin_info = [
                     'name' => $plugin_data['Name'],
@@ -615,10 +657,26 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 ];
 
                 if ( in_array( $plugin_file, $active_plugins ) ) {
-                    $plugins['active'][] = $plugin_info;
+                    if ( $active_count < $max_plugins_per_type ) {
+                        $plugins['active'][] = $plugin_info;
+                        $active_count++;
+                    }
                 } else {
-                    $plugins['inactive'][] = $plugin_info;
+                    if ( $inactive_count < $max_plugins_per_type ) {
+                        $plugins['inactive'][] = $plugin_info;
+                        $inactive_count++;
+                    }
                 }
+            }
+
+            // Add truncation info if we hit limits
+            if ( $active_count >= $max_plugins_per_type ) {
+                $plugins['active_truncated'] = true;
+                $plugins['total_active'] = count( array_intersect( array_keys( $all_plugins ), $active_plugins ) );
+            }
+            if ( $inactive_count >= $max_plugins_per_type ) {
+                $plugins['inactive_truncated'] = true;
+                $plugins['total_inactive'] = count( $all_plugins ) - count( array_intersect( array_keys( $all_plugins ), $active_plugins ) );
             }
 
             return $plugins;
