@@ -1,17 +1,27 @@
-# WooCommerce Sentry Logger
+# WooCommerce Sentry Logger v1.0.0
 
-A WordPress plugin that adds a custom WooCommerce log handler to send logs directly to Sentry using the official Sentry PHP SDK.
+A production-ready WordPress plugin that adds a custom WooCommerce log handler to send logs directly to Sentry using the official Sentry PHP SDK.
 
 ## Features
 
-- Extends WC_Log_Handler abstract class for full WooCommerce compatibility
-- Implements WC_Log_Handler_Interface with the `handle()` method
-- Supports all WooCommerce log levels (emergency, alert, critical, error, warning, notice, info, debug)
-- **Duplicate log prevention** - singleton pattern ensures no duplicate entries to Sentry
-- Automatic context enrichment with WordPress and WooCommerce data
-- Configurable environment settings and PII controls via wp-config.php constants
-- PHP 7.4+ compatibility with modern Sentry SDK integration
-- Proper error handling and fallbacks
+### Core Functionality
+- **Full WooCommerce Integration** - Extends WC_Log_Handler with proper WC_Log_Handler_Interface implementation
+- **All Log Levels** - Supports emergency, alert, critical, error, warning, notice, info, debug
+- **Duplicate Prevention** - Advanced singleton pattern prevents duplicate log entries
+- **Production Ready** - Clean, optimized code with proper error handling
+
+### Context Enrichment
+- **WordPress Environment** - Version, language, debug settings, multisite info, theme details
+- **Server Information** - PHP version, server software, database version, memory usage
+- **User Context** - User ID, roles, registration (with PII controls)
+- **WooCommerce Data** - Version, current page type, product info
+- **Plugin Information** - Configurable plugin statistics and detailed lists
+- **System Context** - Caching systems, memory usage, request details
+
+### Configuration & Security
+- **Flexible Configuration** - Environment detection, PII controls, plugin logging options
+- **Security Focused** - Configurable PII handling, safe data collection
+- **Modern PHP** - 7.4+ compatibility with latest Sentry SDK integration
 
 ## Requirements
 
@@ -50,9 +60,15 @@ define('WP_SENTRY_PHP_DSN', 'https://your-dsn@sentry.io/project-id');
 // Fallback order: WP_SENTRY_ENV → wp_get_environment_type() → 'production'
 define('WP_SENTRY_ENV', 'production');
 
-// Optional: Send user PII data (username, email, display name)
+// Optional: Send user PII data (username, email, display name, IP addresses)
 // Default: false - only user ID is sent
 define('WP_SENTRY_SEND_DEFAULT_PII', false);
+
+// Optional: Plugin logging configuration
+// STATS: Only plugin counts (total, active, inactive, updates_needed)
+// ALL: Complete plugin list with names, versions, authors + stats
+// Not set: No plugin information sent
+define('WP_SENTRY_PLUGIN_LOGGING', 'STATS'); // or 'ALL'
 ```
 
 ### WooCommerce Logger Settings
@@ -147,49 +163,70 @@ add_action('woocommerce_new_order', function($order_id) {
 
 ## Context Enrichment
 
-The plugin automatically adds comprehensive contextual information to all logs, similar to the wp-sentry plugin:
+The plugin automatically adds comprehensive contextual information to all logs, providing rich debugging context in Sentry:
 
-### WordPress Environment Context
-- WordPress version, language, and charset
-- Environment type (`wp_get_environment_type()`)
-- Debug settings (WP_DEBUG, WP_DEBUG_LOG)
-- Multisite information (blog ID, network ID)
-- Active theme and version
-- Memory limits (PHP and WordPress)
+### WordPress Environment (`wp`)
+- **Version & Language** - WordPress version, language, charset
+- **Debug Settings** - WP_DEBUG, WP_DEBUG_LOG, WP_DEBUG_DISPLAY status
+- **Multisite Info** - Blog ID, network ID (if applicable)
+- **Memory Limits** - WP_MEMORY_LIMIT configuration
 
-### System & Runtime Context
-- PHP version and SAPI
-- Server software information
-- Memory usage (current and peak)
-- Database version (MySQL/MariaDB)
-- Request details (method, URI, user agent)
+### Theme Information (`theme`)
+- **Active Theme** - Current theme name and version
+- **Parent Theme** - Parent theme info for child themes
 
-### Caching System Detection
-- Object cache status
-- Caching plugins (W3 Total Cache, WP Super Cache, WP Rocket, Cachify, LiteSpeed Cache)
-- Redis and Memcached availability
-- WP_CACHE constant status
+### Server Environment (`server`)
+- **PHP Details** - Version, SAPI, memory limit
+- **Web Server** - Server software (nginx, Apache, etc.)
+- **Database** - MySQL/MariaDB version
 
-### Enhanced User Context
-- User ID (always included)
-- User roles and capabilities
-- User registration date
-- **PII Data** (only when `WP_SENTRY_SEND_DEFAULT_PII` is true):
-  - Username, email, display name
+### System Runtime
+- **Memory Usage** - Current and peak memory consumption
+- **Caching Systems** - Object cache, plugin detection (W3TC, WP Rocket, etc.)
+- **Request Info** - HTTP method, URI, user agent (PII controlled)
 
-### WooCommerce Specific Context
-- WooCommerce version
-- Current page type (shop, cart, checkout, account, product, etc.)
-- Product ID (on product pages)
-- Cart information (item count, total)
-- Active payment gateways
-- Store settings (currency, tax enabled, shipping enabled)
-- Session status
+### User Context (`user`)
+- **Basic Info** - User ID (always included), logged-in status
+- **PII Data** (when `WP_SENTRY_SEND_DEFAULT_PII` enabled):
+  - Login, email, display name, roles, registration date
 
-### Technical Context
-- Timestamp and source information
-- Plugin version and environment tags
-- Custom context data from log calls
+### WooCommerce Context (`wc`)
+- **Version** - WooCommerce version
+- **Page Type** - shop, cart, checkout, account, product, category
+- **Product Info** - Product ID on product pages
+
+### Plugin Information (`plugins`)
+Plugin data is controlled by `WP_SENTRY_PLUGIN_LOGGING`:
+
+**STATS Mode:**
+```json
+{
+  "total": 45,
+  "active": 28,
+  "inactive": 17,
+  "updates_needed": 3
+}
+```
+
+**ALL Mode:**
+```json
+{
+  "total": 45,
+  "active": 28,
+  "inactive": 17,
+  "updates_needed": 3,
+  "list": "{\"active\":[{\"name\":\"WooCommerce\",\"version\":\"8.1.0\",\"author\":\"Automattic\"}...]}"
+}
+```
+
+### IP Address Context (`ip`)
+When PII is enabled, includes:
+- Remote address, X-Forwarded-For, X-Real-IP headers
+
+### Technical Metadata
+- **Timestamp** - Log entry timestamp
+- **Source** - Inferred source file from backtrace
+- **Plugin Tags** - Plugin name and version
 
 ## Error Handling
 
@@ -331,16 +368,25 @@ If you see errors about `WC_Log_Handler_Interface`, this usually indicates a loa
 
 ### Performance Considerations
 
-- **Duplicate log prevention** reduces unnecessary Sentry API calls
-- Singleton handler pattern minimizes memory usage
-- Logs are automatically flushed on script termination
-- Context data is JSON-encoded for complex types
-- Sentry initialization occurs only once per request
+- **Duplicate Prevention** - Singleton pattern prevents duplicate handlers and Sentry calls
+- **Memory Optimization** - Efficient context collection with size limits (50 plugins max per type)
+- **JSON Encoding** - Complex data safely encoded for Sentry transmission
+- **Single Initialization** - Sentry SDK initialized only once per request
+- **Graceful Degradation** - Continues working even if Sentry is unavailable
+
+## Version History
+
+### v1.0.0 (2025-09-26)
+- **Initial Release** - Production-ready WooCommerce Sentry integration
+- **Core Features** - Full log level support, duplicate prevention, rich context
+- **Plugin Logging** - Configurable plugin statistics and detailed lists
+- **PII Controls** - Granular privacy controls for user data
+- **Production Optimized** - Clean code, proper error handling, memory efficient
 
 ## License
 
-This plugin is licensed under the GPL v2 or later.
+This plugin is licensed under the GPL v3 or later.
 
 ## Support
 
-For issues and support, please contact me on GitHub or create an issue in the project repository.
+For issues and support, please create an issue in the project repository.

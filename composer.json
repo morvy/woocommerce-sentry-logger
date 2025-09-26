@@ -3,6 +3,7 @@
     "description": "A simple WooCommerce log handler that sends logs to Sentry using the Sentry PHP SDK",
     "type": "wordpress-plugin",
     "license": "GPL-3.0-or-later",
+    "version": "1.0.0",
     "authors": [
         {
             "name": "Peter Morvay",

@@ -9,7 +9,7 @@
  * Tested up to: 6.8
  * Requires PHP: 7.4
  * WC requires at least: 5.0
- * WC tested up to: 10.1
+ * WC tested up to: 10.2
  * Text Domain: woocommerce-sentry-logger
  * License: GPL v3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
