@@ -290,22 +290,33 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
         {
             $context = [];
 
+            // Server information grouped together
+            $server_info = [];
+
             // PHP info
-            $php_info = [
+            $server_info['php'] = [
                 'version' => PHP_VERSION,
                 'sapi' => PHP_SAPI
             ];
 
             if ( function_exists( 'wp_convert_hr_to_bytes' ) && ini_get( 'memory_limit' ) ) {
-                $php_info['memory_limit'] = ini_get( 'memory_limit' );
+                $server_info['php']['memory_limit'] = ini_get( 'memory_limit' );
             }
 
-            $context['php'] = $php_info;
-
-            // Server info
+            // Server software
             if ( isset($_SERVER['SERVER_SOFTWARE']) ) {
-                $context['server_software'] = sanitize_text_field( $_SERVER['SERVER_SOFTWARE'] );
+                $server_info['software'] = sanitize_text_field( $_SERVER['SERVER_SOFTWARE'] );
             }
+
+            // Database info
+            if ( function_exists( 'mysql_get_server_info' ) || function_exists( 'mysqli_get_server_info' ) ) {
+                global $wpdb;
+                if ( isset($wpdb) && method_exists( $wpdb, 'db_version' ) ) {
+                    $server_info['mysql_version'] = $wpdb->db_version();
+                }
+            }
+
+            $context['server'] = $server_info;
 
             // Memory usage (human-readable)
             $usage = memory_get_usage( true );
@@ -321,14 +332,7 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
             // Caching detection
             $context = array_merge( $context, $this->detect_caching_systems() );
 
-            // Database info
-            if ( function_exists( 'mysql_get_server_info' ) || function_exists( 'mysqli_get_server_info' ) ) {
-                global $wpdb;
-                if ( isset($wpdb) && method_exists( $wpdb, 'db_version' ) ) {
-                    $context['mysql_version'] = $wpdb->db_version();
-                }
-            }
-
+            // Request info
             if ( isset($_SERVER['REQUEST_METHOD']) ) {
                 $context['request_method'] = sanitize_text_field( $_SERVER['REQUEST_METHOD'] );
             }
