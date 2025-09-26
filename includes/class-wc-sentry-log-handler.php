@@ -228,45 +228,54 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
 
             $context = [];
 
-            // WordPress version
+            // WordPress info
+            $wp_info = [];
             if ( ! empty($wp_version) ) {
-                $context['wp_version'] = $wp_version;
+                $wp_info['version'] = $wp_version;
             } elseif ( function_exists( 'get_bloginfo' ) ) {
-                $context['wp_version'] = get_bloginfo( 'version' );
+                $wp_info['version'] = get_bloginfo( 'version' );
             }
 
-            // Site language
             if ( function_exists( 'get_bloginfo' ) ) {
-                $context['wp_language'] = get_bloginfo( 'language' );
-                $context['wp_charset']  = get_bloginfo( 'charset' );
+                $wp_info['language'] = get_bloginfo( 'language' );
+                $wp_info['charset']  = get_bloginfo( 'charset' );
             }
 
-            // WordPress debug info
-            $context['wp_debug']         = defined( 'WP_DEBUG' ) && WP_DEBUG;
-            $context['wp_debug_log']     = defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG;
-            $context['wp_debug_display'] = defined( 'WP_DEBUG_DISPLAY' ) && WP_DEBUG_DISPLAY;
+            $wp_info['debug'] = [
+                'enabled' => defined( 'WP_DEBUG' ) && WP_DEBUG,
+                'log' => defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG,
+                'display' => defined( 'WP_DEBUG_DISPLAY' ) && WP_DEBUG_DISPLAY
+            ];
 
-            // Multisite
-            $context['is_multisite'] = is_multisite();
+            $wp_info['is_multisite'] = is_multisite();
             if ( is_multisite() && function_exists( 'get_current_blog_id' ) ) {
-                $context['blog_id']    = get_current_blog_id();
-                $context['network_id'] = get_current_network_id();
+                $wp_info['blog_id']    = get_current_blog_id();
+                $wp_info['network_id'] = get_current_network_id();
             }
 
-            // Active theme
+            if ( function_exists( 'wp_convert_hr_to_bytes' ) && ini_get( 'memory_limit' ) ) {
+                $wp_info['memory_limit'] = defined( 'WP_MEMORY_LIMIT' ) ? WP_MEMORY_LIMIT : 'default';
+            }
+
+            $context['wp'] = $wp_info;
+
+            // Theme info
+            $theme_info = [];
             if ( function_exists( 'get_stylesheet' ) ) {
-                $context['theme_active'] = get_stylesheet();
+                $theme_info['active'] = get_stylesheet();
                 if ( function_exists( 'wp_get_theme' ) ) {
-                    $theme                    = wp_get_theme();
-                    $context['theme_version'] = $theme->get( 'Version' );
+                    $theme = wp_get_theme();
+                    $theme_info['version'] = $theme->get( 'Version' );
+
+                    // Add parent theme if current is a child theme
+                    if ( $theme->get_template() !== $theme->get_stylesheet() ) {
+                        $parent_theme = wp_get_theme( $theme->get_template() );
+                        $theme_info['parent'] = $theme->get_template();
+                        $theme_info['parent_version'] = $parent_theme->get( 'Version' );
+                    }
                 }
             }
-
-            // Memory limit
-            if ( function_exists( 'wp_convert_hr_to_bytes' ) && ini_get( 'memory_limit' ) ) {
-                $context['php_memory_limit'] = ini_get( 'memory_limit' );
-                $context['wp_memory_limit']  = defined( 'WP_MEMORY_LIMIT' ) ? WP_MEMORY_LIMIT : 'default';
-            }
+            $context['theme'] = $theme_info;
 
             return $context;
         }
@@ -278,9 +287,17 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
         {
             $context = [];
 
-            // PHP version and info
-            $context['php_version'] = PHP_VERSION;
-            $context['php_sapi']    = PHP_SAPI;
+            // PHP info
+            $php_info = [
+                'version' => PHP_VERSION,
+                'sapi' => PHP_SAPI
+            ];
+
+            if ( function_exists( 'wp_convert_hr_to_bytes' ) && ini_get( 'memory_limit' ) ) {
+                $php_info['memory_limit'] = ini_get( 'memory_limit' );
+            }
+
+            $context['php'] = $php_info;
 
             // Server info
             if ( isset($_SERVER['SERVER_SOFTWARE']) ) {
@@ -408,38 +425,37 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
         {
             $context = [];
 
-            if ( is_user_logged_in() ) {
-                $user               = wp_get_current_user();
-                $context['user_id'] = $user->ID;
+            $user_info = [];
 
-                // Enhanced user info based on PII settings
+            if ( is_user_logged_in() ) {
+                $user = wp_get_current_user();
+                $user_info['id'] = $user->ID;
+                $user_info['logged_in'] = true;
+
+                // PII fields
                 if ( $this->should_include_pii_field( 'user_login' ) ) {
-                    $context['user_login'] = $user->user_login;
+                    $user_info['login'] = $user->user_login;
                 }
                 if ( $this->should_include_pii_field( 'user_email' ) ) {
-                    $context['user_email'] = $user->user_email;
+                    $user_info['email'] = $user->user_email;
                 }
                 if ( $this->should_include_pii_field( 'user_display_name' ) ) {
-                    $context['user_display_name'] = $user->display_name;
+                    $user_info['display_name'] = $user->display_name;
                 }
-
-                // User roles and capabilities
                 if ( $this->should_include_pii_field( 'user_roles' ) ) {
-                    $context['user_roles'] = implode( ', ', $user->roles );
+                    $user_info['roles'] = implode( ', ', $user->roles );
                 }
                 if ( $this->should_include_pii_field( 'user_level' ) ) {
-                    $context['user_level'] = isset($user->user_level) ? $user->user_level : 0;
+                    $user_info['level'] = isset($user->user_level) ? $user->user_level : 0;
                 }
-
-                // Registration info
-                if ( ! empty($user->user_registered) ) {
-                    if ( $this->should_include_pii_field( 'user_registered' ) ) {
-                        $context['user_registered'] = $user->user_registered;
-                    }
+                if ( ! empty($user->user_registered) && $this->should_include_pii_field( 'user_registered' ) ) {
+                    $user_info['registered'] = $user->user_registered;
                 }
             } else {
-                $context['user_logged_in'] = false;
+                $user_info['logged_in'] = false;
             }
+
+            $context['user'] = $user_info;
 
             return $context;
         }
@@ -490,9 +506,12 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 'user_registered',
                 'user_roles',
                 'user_level',
-                'remote_addr',
+                'ip_remote_addr',
+                'ip_x_forwarded_for',
+                'ip_x_real_ip',
                 'request_uri',
-                'user_agent'
+                'user_agent',
+                'server_software'
             ];
 
             return apply_filters( 'wc_sentry_pii_fields', $default_pii_fields );
