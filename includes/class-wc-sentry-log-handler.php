@@ -309,19 +309,24 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 }
             }
 
-            // Request info (if available and PII allowed)
-            $send_pii = defined( 'WP_SENTRY_SEND_DEFAULT_PII' ) ? WP_SENTRY_SEND_DEFAULT_PII : false;
-
             if ( isset($_SERVER['REQUEST_METHOD']) ) {
                 $context['request_method'] = sanitize_text_field( $_SERVER['REQUEST_METHOD'] );
             }
 
-            if ( $send_pii ) {
-                if ( isset($_SERVER['REQUEST_URI']) ) {
+            if ( isset($_SERVER['REQUEST_URI']) ) {
+                if ( $this->should_include_pii_field( 'request_uri' ) ) {
                     $context['request_uri'] = sanitize_text_field( $_SERVER['REQUEST_URI'] );
                 }
-                if ( isset($_SERVER['HTTP_USER_AGENT']) ) {
+            }
+            if ( isset($_SERVER['HTTP_USER_AGENT']) ) {
+                if ( $this->should_include_pii_field( 'user_agent' ) ) {
                     $context['user_agent'] = sanitize_text_field( $_SERVER['HTTP_USER_AGENT'] );
+                }
+            }
+
+            if ( isset($_SERVER['REMOTE_ADDR']) ) {
+                if ( $this->should_include_pii_field( 'remote_addr' ) ) {
+                    $context['remote_addr'] = sanitize_text_field( $_SERVER['REMOTE_ADDR'] );
                 }
             }
 
@@ -408,21 +413,27 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 $context['user_id'] = $user->ID;
 
                 // Enhanced user info based on PII settings
-                $send_pii = defined( 'WP_SENTRY_SEND_DEFAULT_PII' ) ? WP_SENTRY_SEND_DEFAULT_PII : false;
-
-                if ( $send_pii ) {
-                    $context['user_login']        = $user->user_login;
-                    $context['user_email']        = $user->user_email;
+                if ( $this->should_include_pii_field( 'user_login' ) ) {
+                    $context['user_login'] = $user->user_login;
+                }
+                if ( $this->should_include_pii_field( 'user_email' ) ) {
+                    $context['user_email'] = $user->user_email;
+                }
+                if ( $this->should_include_pii_field( 'user_display_name' ) ) {
                     $context['user_display_name'] = $user->display_name;
                 }
 
-                // User roles and capabilities (only if PII allowed)
-                if ( $send_pii ) {
+                // User roles and capabilities
+                if ( $this->should_include_pii_field( 'user_roles' ) ) {
                     $context['user_roles'] = implode( ', ', $user->roles );
+                }
+                if ( $this->should_include_pii_field( 'user_level' ) ) {
                     $context['user_level'] = isset($user->user_level) ? $user->user_level : 0;
+                }
 
-                    // Registration info
-                    if ( ! empty($user->user_registered) ) {
+                // Registration info
+                if ( ! empty($user->user_registered) ) {
+                    if ( $this->should_include_pii_field( 'user_registered' ) ) {
                         $context['user_registered'] = $user->user_registered;
                     }
                 }
@@ -468,6 +479,43 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
             }
 
             return $context;
+        }
+
+        private function get_pii_fields()
+        {
+            $default_pii_fields = [
+                'user_login',
+                'user_email',
+                'user_display_name',
+                'user_registered',
+                'user_roles',
+                'user_level',
+                'remote_addr',
+                'request_uri',
+                'user_agent'
+            ];
+
+            return apply_filters( 'wc_sentry_pii_fields', $default_pii_fields );
+        }
+
+        private function should_include_pii_field( $field_name )
+        {
+            $pii_fields = $this->get_pii_fields();
+            $is_pii_field = in_array( $field_name, $pii_fields, true );
+
+            // Non-PII fields are always included
+            if ( ! $is_pii_field ) {
+                return true;
+            }
+
+            // For PII fields, check if PII sending is enabled globally
+            $send_pii = defined( 'WP_SENTRY_SEND_DEFAULT_PII' ) ? WP_SENTRY_SEND_DEFAULT_PII : false;
+            if ( ! $send_pii ) {
+                return false; // PII disabled globally, exclude this field
+            }
+
+            // PII is enabled, include by default but allow filter to exclude
+            return apply_filters( 'wc_sentry_include_pii_field', true, $field_name );
         }
 
         public function __destruct()
