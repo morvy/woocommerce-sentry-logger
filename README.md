@@ -1,4 +1,4 @@
-# WooCommerce Sentry Logger v1.0.0
+# WooCommerce Sentry Logger
 
 A production-ready WordPress plugin that adds a custom WooCommerce log handler to send logs directly to Sentry using the official Sentry PHP SDK.
 
