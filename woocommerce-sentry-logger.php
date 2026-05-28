@@ -2,14 +2,14 @@
 /**
  * Plugin Name: Sentry Logger for WooCommerce
  * Description: A simple WooCommerce log handler that sends logs to Sentry using the Sentry PHP SDK.
- * Version: 1.0.2
+ * Version: 1.1.0
  * Author: MoPed
  * Author URI: https://moped.jepan.sk
  * Requires at least: 5.0
- * Tested up to: 6.9
+ * Tested up to: 7.0
  * Requires PHP: 7.4
  * WC requires at least: 5.0
- * WC tested up to: 10.4
+ * WC tested up to: 10.8
  * Text Domain: woocommerce-sentry-logger
  * License: GPL v3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -21,7 +21,7 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
     class WC_Sentry_Logger_Plugin
     {
 
-        public const VERSION = '1.0.2';
+        public const VERSION = '1.1.0';
 
         private static $plugin_file;
         private static $plugin_basename;
@@ -29,6 +29,7 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
 
         private static $instance = null;
         private static $handler_instance = null;
+        private $sentry_sdk_mode = 'disabled';
 
         public static function instance()
         {
@@ -70,12 +71,43 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
         }
         public function plugins_loaded()
         {
+            $this->sentry_sdk_mode = $this->determine_sentry_sdk_mode();
+
             if ( ! $this->check_dependencies() ) {
                 return;
             }
 
             $this->load_dependencies();
             $this->register_log_handler();
+        }
+
+        private function determine_sentry_sdk_mode()
+        {
+            if ( ! defined( 'WP_SENTRY_PHP_DSN' ) || empty( WP_SENTRY_PHP_DSN ) ) {
+                return 'disabled';
+            }
+
+            $wp_sentry_configured = false;
+
+            if ( defined( 'WP_SENTRY_LOADED' ) && function_exists( 'wp_sentry_safe' ) ) {
+                try {
+                    wp_sentry_safe( static function () use ( &$wp_sentry_configured ) {
+                        $wp_sentry_configured = true;
+                    } );
+                } catch ( Throwable $e ) {
+                    $wp_sentry_configured = false;
+                }
+            }
+
+            if ( $wp_sentry_configured ) {
+                return 'wp_sentry';
+            }
+
+            if ( file_exists( self::$plugin_dir . '/vendor/autoload.php' ) ) {
+                return 'bundled';
+            }
+
+            return 'disabled';
         }
 
         private function check_dependencies()
@@ -85,8 +117,17 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
                 return false;
             }
 
-            if ( ! defined( 'WP_SENTRY_PHP_DSN' ) || empty(WP_SENTRY_PHP_DSN) ) {
+            if ( ! defined( 'WP_SENTRY_PHP_DSN' ) || empty( WP_SENTRY_PHP_DSN ) ) {
                 add_action( 'admin_notices', array( $this, 'sentry_dsn_missing_notice' ) );
+                return false;
+            }
+
+            if ( 'wp_sentry' === $this->sentry_sdk_mode || 'bundled' === $this->sentry_sdk_mode ) {
+                return true;
+            }
+
+            if ( defined( 'WP_SENTRY_LOADED' ) ) {
+                add_action( 'admin_notices', array( $this, 'wp_sentry_unavailable_notice' ) );
                 return false;
             }
 
@@ -100,7 +141,9 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
 
         private function load_dependencies()
         {
-            require_once self::$plugin_dir . '/vendor/autoload.php';
+            if ( 'bundled' === $this->sentry_sdk_mode ) {
+                require_once self::$plugin_dir . '/vendor/autoload.php';
+            }
 
             // Ensure WooCommerce log handler interfaces are loaded
             if ( class_exists( 'WC_Logger' ) && ! interface_exists( 'WC_Log_Handler_Interface' ) ) {
@@ -128,7 +171,7 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
         {
             if ( class_exists( 'WC_Sentry_Log_Handler' ) ) {
                 if ( null === self::$handler_instance ) {
-                    self::$handler_instance = new WC_Sentry_Log_Handler();
+                    self::$handler_instance = new WC_Sentry_Log_Handler( $this->sentry_sdk_mode );
                 }
 
                 // Check if our handler is already in the array to prevent duplicates
@@ -176,6 +219,13 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
         {
             echo '<div class="error notice"><p>';
             echo esc_html__( 'WooCommerce Sentry Logger requires WP_SENTRY_PHP_DSN to be defined in wp-config.php.', 'woocommerce-sentry-logger' );
+            echo '</p></div>';
+        }
+
+        public function wp_sentry_unavailable_notice()
+        {
+            echo '<div class="error notice"><p>';
+            echo esc_html__( 'WooCommerce Sentry Logger detected "Sentry for WordPress" but no active PHP client is available. WP_SENTRY_PHP_DSN must remain defined; install local composer dependencies to use bundled fallback.', 'woocommerce-sentry-logger' );
             echo '</p></div>';
         }
 

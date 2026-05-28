@@ -8,15 +8,24 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
     {
 
         private $initialized = false;
+        private $sdk_source = 'bundled';
 
-        public function __construct()
+        public function __construct( $sdk_source = 'bundled' )
         {
+            if ( is_string( $sdk_source ) && $sdk_source !== '' ) {
+                $this->sdk_source = $sdk_source;
+            }
+
             $this->init_sentry();
         }
 
         private function init_sentry()
         {
             if ( $this->initialized ) {
+                return;
+            }
+
+            if ( 'wp_sentry' === $this->sdk_source && $this->initialize_from_wp_sentry() ) {
                 return;
             }
 
@@ -43,6 +52,33 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
             ] );
 
             $this->initialized = true;
+            $this->sdk_source = 'bundled';
+        }
+
+        private function initialize_from_wp_sentry()
+        {
+            if ( ! function_exists( 'wp_sentry_safe' ) ) {
+                return false;
+            }
+
+            $configured = false;
+
+            try {
+                wp_sentry_safe( static function () use ( &$configured ) {
+                    $configured = true;
+                } );
+            } catch ( Throwable $e ) {
+                return false;
+            }
+
+            if ( ! $configured ) {
+                return false;
+            }
+
+            $this->initialized = true;
+            $this->sdk_source = 'wp_sentry';
+
+            return true;
         }
 
         /**
@@ -61,47 +97,46 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 return false;
             }
 
-            // Safety check: ensure Sentry logger function is available
-            if ( ! function_exists( '\\Sentry\\logger' ) ) {
-                return false;
-            }
-
             $context = (array) $context;
 
             $formatted_message = $this->format_message( $message, $context );
             $attributes        = $this->prepare_attributes( $context, $timestamp );
 
             try {
-                $logger = \Sentry\logger();
-                if ( null === $logger ) {
-                    return false;
+                if ( $this->should_use_logger_api() ) {
+                    $logger = \Sentry\logger();
+                    if ( null === $logger ) {
+                        return false;
+                    }
+
+                    switch ( $level ) {
+                    case 'emergency':
+                    case 'alert':
+                    case 'critical':
+                        $logger->fatal( $formatted_message, [], $attributes );
+                        break;
+                    case 'error':
+                        $logger->error( $formatted_message, [], $attributes );
+                        break;
+                    case 'warning':
+                        $logger->warn( $formatted_message, [], $attributes );
+                        break;
+                    case 'notice':
+                    case 'info':
+                        $logger->info( $formatted_message, [], $attributes );
+                        break;
+                    case 'debug':
+                        $logger->debug( $formatted_message, [], $attributes );
+                        break;
+                    default:
+                        $logger->info( $formatted_message, [], $attributes );
+                        break;
+                    }
+
+                    return true;
                 }
 
-                switch ( $level ) {
-                case 'emergency':
-                case 'alert':
-                case 'critical':
-                    $logger->fatal( $formatted_message, attributes: $attributes );
-                    break;
-                case 'error':
-                    $logger->error( $formatted_message, attributes: $attributes );
-                    break;
-                case 'warning':
-                    $logger->warn( $formatted_message, attributes: $attributes );
-                    break;
-                case 'notice':
-                case 'info':
-                    $logger->info( $formatted_message, attributes: $attributes );
-                    break;
-                case 'debug':
-                    $logger->debug( $formatted_message, attributes: $attributes );
-                    break;
-                default:
-                    $logger->info( $formatted_message, attributes: $attributes );
-                    break;
-                }
-
-                return true;
+                return $this->capture_message_with_scope( $formatted_message, $level, $attributes );
             } catch ( \Throwable $e ) {
                 return false;
             }
@@ -116,9 +151,68 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
          */
         public function clear( $source, $quiet = false )
         {
-            // Sentry logs are remote and cannot be cleared via the handler.
-            // Return true to indicate the operation "succeeded" (nothing to clear locally).
             return true;
+        }
+
+        private function should_use_logger_api()
+        {
+            if ( 'wp_sentry' === $this->sdk_source ) {
+                return false;
+            }
+
+            return function_exists( '\Sentry\logger' );
+        }
+
+        private function capture_message_with_scope( $message, $level, array $attributes )
+        {
+            if ( ! function_exists( '\Sentry\withScope' ) || ! function_exists( '\Sentry\captureMessage' ) ) {
+                return false;
+            }
+
+            $severity = $this->map_level_to_severity( $level );
+
+            \Sentry\withScope( function ( \Sentry\State\Scope $scope ) use ( $message, $severity, $attributes, $level ) {
+                $scope->setTag( 'wc_log_level', (string) $level );
+
+                foreach ( $attributes as $key => $value ) {
+                    $key = (string) $key;
+
+                    if ( is_scalar( $value ) || is_null( $value ) ) {
+                        $scope->setExtra( $key, $value );
+                        continue;
+                    }
+
+                    $scope->setExtra( $key, wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+                }
+
+                \Sentry\captureMessage( $message, $severity );
+            } );
+
+            return true;
+        }
+
+        private function map_level_to_severity( $level )
+        {
+            if ( ! class_exists( '\Sentry\Severity' ) ) {
+                return null;
+            }
+
+            switch ( $level ) {
+            case 'emergency':
+            case 'alert':
+            case 'critical':
+                return \Sentry\Severity::fatal();
+            case 'error':
+                return \Sentry\Severity::error();
+            case 'warning':
+                return \Sentry\Severity::warning();
+            case 'debug':
+                return \Sentry\Severity::debug();
+            case 'notice':
+            case 'info':
+            default:
+                return \Sentry\Severity::info();
+            }
         }
 
         private function format_message( $message, $context = [] )
@@ -749,8 +843,14 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
 
         public function __destruct()
         {
-            if ( $this->initialized && function_exists( '\Sentry\logger' ) ) {
+            if ( ! $this->initialized || ! $this->should_use_logger_api() ) {
+                return;
+            }
+
+            try {
                 \Sentry\logger()->flush();
+            } catch ( Throwable $e ) {
+                // no-op
             }
         }
     }

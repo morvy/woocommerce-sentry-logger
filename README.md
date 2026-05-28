@@ -5,12 +5,14 @@ A production-ready WordPress plugin that adds a custom WooCommerce log handler t
 ## Features
 
 ### Core Functionality
+
 - **Full WooCommerce Integration** - Extends WC_Log_Handler with proper WC_Log_Handler_Interface implementation
 - **All Log Levels** - Supports emergency, alert, critical, error, warning, notice, info, debug
 - **Duplicate Prevention** - Advanced singleton pattern prevents duplicate log entries
 - **Production Ready** - Clean, optimized code with proper error handling
 
 ### Context Enrichment
+
 - **WordPress Environment** - Version, language, debug settings, multisite info, theme details
 - **Server Information** - PHP version, server software, database version, memory usage
 - **User Context** - User ID, roles, registration (with PII controls)
@@ -19,6 +21,7 @@ A production-ready WordPress plugin that adds a custom WooCommerce log handler t
 - **System Context** - Caching systems, memory usage, request details
 
 ### Configuration & Security
+
 - **Flexible Configuration** - Environment detection, PII controls, plugin logging options
 - **Security Focused** - Configurable PII handling, safe data collection
 - **Modern PHP** - 7.4+ compatibility with latest Sentry SDK integration
@@ -28,23 +31,34 @@ A production-ready WordPress plugin that adds a custom WooCommerce log handler t
 - WordPress 5.0+
 - WooCommerce 5.0+
 - PHP 7.4+
-- Composer (for installing dependencies)
+- Composer (only required for bundled fallback mode)
 
 ## Installation
 
 1. Upload the plugin to `/wp-content/plugins/woocommerce-sentry-logger/`
-2. Install dependencies:
-   ```bash
-   cd /wp-content/plugins/woocommerce-sentry-logger/
-   composer install
-   ```
-3. Add Sentry configuration to `wp-config.php`:
-   ```php
-   define('WP_SENTRY_PHP_DSN', 'your-sentry-dsn-here');
-   define('WP_SENTRY_ENV', 'production'); // Optional, defaults to 'production'
-   ```
+2. Choose SDK mode:
+    - **Shared mode (recommended):** Activate and configure **Sentry for WordPress** (`wp-sentry-integration`) with a PHP DSN.
+    - **Bundled fallback mode:** Install local dependencies:
+        ```bash
+        cd /wp-content/plugins/woocommerce-sentry-logger/
+        composer install
+        ```
+3. Add Sentry configuration to `wp-config.php` (required in all modes):
+    ```php
+    define('WP_SENTRY_PHP_DSN', 'your-sentry-dsn-here');
+    define('WP_SENTRY_ENV', 'production'); // Optional, defaults to 'production'
+    ```
 4. Activate the plugin through the WordPress admin
 5. Configure WooCommerce to use the Sentry log handler
+
+## SDK Precedence
+
+The plugin uses this order at runtime:
+
+1. **Reuse Sentry for WordPress client** when `wp-sentry-integration` is active and configured.
+2. **Fallback to bundled SDK** only when shared client is not available.
+
+This prevents dual-SDK version collisions between plugins and avoids fatals caused by mixed Sentry classes.
 
 ## Configuration
 
@@ -53,10 +67,10 @@ A production-ready WordPress plugin that adds a custom WooCommerce log handler t
 Add these constants to your `wp-config.php` file:
 
 ```php
-// Required: Your Sentry DSN
+// Required in all modes (shared wp-sentry client and bundled fallback)
 define('WP_SENTRY_PHP_DSN', 'https://your-dsn@sentry.io/project-id');
 
-// Optional: Environment name 
+// Optional: Environment name
 // Fallback order: WP_SENTRY_ENV → wp_get_environment_type() → 'production'
 define('WP_SENTRY_ENV', 'production');
 
@@ -84,9 +98,12 @@ The plugin automatically registers itself as a selectable WooCommerce log handle
 Once set as the default handler, all WooCommerce logs will automatically be sent to Sentry.
 
 **Note:** The Sentry handler will only appear in the dropdown if:
+
 - WooCommerce is installed and activated
-- The plugin's composer dependencies are installed (`composer install`)
-- `WP_SENTRY_PHP_DSN` is defined in `wp-config.php`
+- `WP_SENTRY_PHP_DSN` is defined
+- And one of these is true:
+    - `wp-sentry-integration` is active and has an active PHP client
+    - Bundled fallback requirements are met (`composer install`)
 
 #### Using Specific Handler in Code
 
@@ -148,7 +165,7 @@ $logger->error(
 add_action('woocommerce_new_order', function($order_id) {
     $logger = wc_get_logger();
     $order = wc_get_order($order_id);
-    
+
     $logger->info(
         'New order created: {order_id}',
         'sentry',
@@ -166,64 +183,76 @@ add_action('woocommerce_new_order', function($order_id) {
 The plugin automatically adds comprehensive contextual information to all logs, providing rich debugging context in Sentry:
 
 ### WordPress Environment (`wp`)
+
 - **Version & Language** - WordPress version, language, charset
 - **Debug Settings** - WP_DEBUG, WP_DEBUG_LOG, WP_DEBUG_DISPLAY status
 - **Multisite Info** - Blog ID, network ID (if applicable)
 - **Memory Limits** - WP_MEMORY_LIMIT configuration
 
 ### Theme Information (`theme`)
+
 - **Active Theme** - Current theme name and version
 - **Parent Theme** - Parent theme info for child themes
 
 ### Server Environment (`server`)
+
 - **PHP Details** - Version, SAPI, memory limit
 - **Web Server** - Server software (nginx, Apache, etc.)
 - **Database** - MySQL/MariaDB version
 
 ### System Runtime
+
 - **Memory Usage** - Current and peak memory consumption
 - **Caching Systems** - Object cache, plugin detection (W3TC, WP Rocket, etc.)
 - **Request Info** - HTTP method, URI, user agent (PII controlled)
 
 ### User Context (`user`)
+
 - **Basic Info** - User ID (always included), logged-in status
 - **PII Data** (when `WP_SENTRY_SEND_DEFAULT_PII` enabled):
-  - Login, email, display name, roles, registration date
+    - Login, email, display name, roles, registration date
 
 ### WooCommerce Context (`wc`)
+
 - **Version** - WooCommerce version
 - **Page Type** - shop, cart, checkout, account, product, category
 - **Product Info** - Product ID on product pages
 
 ### Plugin Information (`plugins`)
+
 Plugin data is controlled by `WP_SENTRY_PLUGIN_LOGGING`:
 
 **STATS Mode:**
+
 ```json
 {
-  "total": 45,
-  "active": 28,
-  "inactive": 17,
-  "updates_needed": 3
+    "total": 45,
+    "active": 28,
+    "inactive": 17,
+    "updates_needed": 3
 }
 ```
 
 **ALL Mode:**
+
 ```json
 {
-  "total": 45,
-  "active": 28,
-  "inactive": 17,
-  "updates_needed": 3,
-  "list": "{\"active\":[{\"name\":\"WooCommerce\",\"version\":\"8.1.0\",\"author\":\"Automattic\"}...]}"
+    "total": 45,
+    "active": 28,
+    "inactive": 17,
+    "updates_needed": 3,
+    "list": "{\"active\":[{\"name\":\"WooCommerce\",\"version\":\"8.1.0\",\"author\":\"Automattic\"}...]}"
 }
 ```
 
 ### IP Address Context (`ip`)
+
 When PII is enabled, includes:
+
 - Remote address, X-Forwarded-For, X-Real-IP headers
 
 ### Technical Metadata
+
 - **Timestamp** - Log entry timestamp
 - **Source** - Inferred source file from backtrace
 - **Plugin Tags** - Plugin name and version
@@ -264,12 +293,14 @@ WooCommerce → Sentry mapping:
 ### Technical Implementation
 
 **Handler Registration:**
+
 - Uses `woocommerce_register_log_handlers` filter to register handler instances
 - Uses `woocommerce_logger_handler_options` filter to make handler selectable in admin
 - Handler extends `WC_Log_Handler` and implements the required `handle()` method
 - **Singleton pattern prevents duplicate handler registration** - same instance reused across filter calls
 
 **Duplicate Prevention Logic:**
+
 ```php
 // Singleton handler instance
 private static $handler_instance = null;
@@ -278,7 +309,7 @@ public function register_sentry_handler( $handlers ) {
     if ( class_exists( 'WC_Sentry_Log_Handler' ) ) {
         // Create singleton instance
         if ( null === self::$handler_instance ) {
-            self::$handler_instance = new WC_Sentry_Log_Handler();
+            self::$handler_instance = new WC_Sentry_Log_Handler( $this->sentry_sdk_mode );
         }
 
         // Only add if not already present in handlers array
@@ -299,6 +330,7 @@ public function register_sentry_handler( $handlers ) {
 ```
 
 **Key Implementation Details:**
+
 ```php
 // Environment detection with fallback (like wp-sentry)
 private function get_environment() {
@@ -311,10 +343,21 @@ private function get_environment() {
     return $environment ?? 'production';
 }
 
+// Runtime SDK source selection
+private function determine_sentry_sdk_mode() {
+    // Prefer shared wp-sentry client when available
+    // Fallback to bundled SDK only when needed
+}
+
 // Sentry initialization with duplicate prevention
 private function init_sentry() {
     if ( $this->initialized ) {
         return; // Prevent multiple initializations
+    }
+
+    if ( 'wp_sentry' === $this->sdk_source ) {
+        // Reuse existing wp-sentry client/hub
+        return;
     }
 
     \Sentry\init([
@@ -337,20 +380,23 @@ private function init_sentry() {
 ### Plugin Not Working
 
 1. Ensure WooCommerce is installed and activated
-2. Check that `WP_SENTRY_PHP_DSN` is defined in `wp-config.php`
-3. Verify composer dependencies are installed (`composer install`)
-4. Check WordPress admin for error notices
+2. Ensure `WP_SENTRY_PHP_DSN` is defined in `wp-config.php`
+3. If using shared mode, ensure **Sentry for WordPress** is active and configured
+4. If using bundled fallback mode, run `composer install`
+5. Check WordPress admin for error notices
 
 ### Logs Not Appearing in Sentry
 
 1. Verify your Sentry DSN is correct
 2. Check Sentry project settings and quotas
 3. Ensure the environment matches your Sentry configuration
-4. Test with a simple log message to isolate the issue
+4. In shared mode, this plugin sends logs via captureMessage delivery through the shared Sentry client
+5. Test with a simple log message to isolate the issue
 
 ### Duplicate Logs in Sentry
 
 **This issue has been resolved** in the current version through:
+
 - Singleton pattern for handler instances
 - Duplicate detection in handler registration
 - Prevention of multiple Sentry SDK initializations
@@ -377,6 +423,7 @@ If you see errors about `WC_Log_Handler_Interface`, this usually indicates a loa
 ## Version History
 
 ### v1.0.0 (2025-09-26)
+
 - **Initial Release** - Production-ready WooCommerce Sentry integration
 - **Core Features** - Full log level support, duplicate prevention, rich context
 - **Plugin Logging** - Configurable plugin statistics and detailed lists
@@ -384,10 +431,18 @@ If you see errors about `WC_Log_Handler_Interface`, this usually indicates a loa
 - **Production Optimized** - Clean code, proper error handling, memory efficient
 
 ### v1.0.1 (2025-10-03)
+
 - **FIX** - fatal error in const VERSION
 
 ### v1.0.2 (2026-02-02)
 - **FIX** - safety check for Sentry logger
+
+### v1.1.0 (2026-05-28)
+
+- **FIX** - Prevent dual-SDK class collisions by preferring `wp-sentry-integration` SDK when available
+- **NEW** - Bundled SDK is now fallback-only and loaded conditionally
+- **NEW** - Shared-mode delivery uses captureMessage path with the shared Sentry client
+- **DOCS** - Added SDK precedence and mode-aware setup requirements
 
 ## License
 
