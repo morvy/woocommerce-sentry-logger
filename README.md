@@ -386,6 +386,9 @@ If you see errors about `WC_Log_Handler_Interface`, this usually indicates a loa
 ### v1.0.1 (2025-10-03)
 - **FIX** - fatal error in const VERSION
 
+### v1.0.2 (2026-02-02)
+- **FIX** - safety check for Sentry logger
+
 ## License
 
 This plugin is licensed under the GPL v3 or later.

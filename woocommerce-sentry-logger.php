@@ -2,14 +2,14 @@
 /**
  * Plugin Name: Sentry Logger for WooCommerce
  * Description: A simple WooCommerce log handler that sends logs to Sentry using the Sentry PHP SDK.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: MoPed
  * Author URI: https://moped.jepan.sk
  * Requires at least: 5.0
- * Tested up to: 6.8
+ * Tested up to: 6.9
  * Requires PHP: 7.4
  * WC requires at least: 5.0
- * WC tested up to: 10.2
+ * WC tested up to: 10.4
  * Text Domain: woocommerce-sentry-logger
  * License: GPL v3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -21,7 +21,7 @@ if ( ! class_exists( 'WC_Sentry_Logger_Plugin' ) ) {
     class WC_Sentry_Logger_Plugin
     {
 
-        public const VERSION = '1.0.1';
+        public const VERSION = '1.0.2';
 
         private static $plugin_file;
         private static $plugin_basename;

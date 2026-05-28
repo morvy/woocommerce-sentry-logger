@@ -61,40 +61,64 @@ if ( ! class_exists( 'WC_Sentry_Log_Handler' ) && class_exists( 'WC_Log_Handler'
                 return false;
             }
 
+            // Safety check: ensure Sentry logger function is available
+            if ( ! function_exists( '\\Sentry\\logger' ) ) {
+                return false;
+            }
+
             $context = (array) $context;
 
             $formatted_message = $this->format_message( $message, $context );
             $attributes        = $this->prepare_attributes( $context, $timestamp );
 
             try {
+                $logger = \Sentry\logger();
+                if ( null === $logger ) {
+                    return false;
+                }
+
                 switch ( $level ) {
                 case 'emergency':
                 case 'alert':
                 case 'critical':
-                    \Sentry\logger()->fatal( $formatted_message, attributes: $attributes );
+                    $logger->fatal( $formatted_message, attributes: $attributes );
                     break;
                 case 'error':
-                    \Sentry\logger()->error( $formatted_message, attributes: $attributes );
+                    $logger->error( $formatted_message, attributes: $attributes );
                     break;
                 case 'warning':
-                    \Sentry\logger()->warn( $formatted_message, attributes: $attributes );
+                    $logger->warn( $formatted_message, attributes: $attributes );
                     break;
                 case 'notice':
                 case 'info':
-                    \Sentry\logger()->info( $formatted_message, attributes: $attributes );
+                    $logger->info( $formatted_message, attributes: $attributes );
                     break;
                 case 'debug':
-                    \Sentry\logger()->debug( $formatted_message, attributes: $attributes );
+                    $logger->debug( $formatted_message, attributes: $attributes );
                     break;
                 default:
-                    \Sentry\logger()->info( $formatted_message, attributes: $attributes );
+                    $logger->info( $formatted_message, attributes: $attributes );
                     break;
                 }
 
                 return true;
-            } catch (Exception $e) {
+            } catch ( \Throwable $e ) {
                 return false;
             }
+        }
+
+        /**
+         * Clear logs for a source. No-op for Sentry since logs are remote.
+         *
+         * @param string $source The log source.
+         * @param bool   $quiet  Suppress messages.
+         * @return bool Always returns true since there's nothing to clear locally.
+         */
+        public function clear( $source, $quiet = false )
+        {
+            // Sentry logs are remote and cannot be cleared via the handler.
+            // Return true to indicate the operation "succeeded" (nothing to clear locally).
+            return true;
         }
 
         private function format_message( $message, $context = [] )
